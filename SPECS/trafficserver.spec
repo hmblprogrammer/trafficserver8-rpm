@@ -3,29 +3,23 @@
 
 Summary:	Fast, scalable and extensible HTTP/1.1 compliant caching proxy server
 Name:		trafficserver
-Version:	8.0.5
+Version:	8.0.7
 Release:	1%{?dist}
 License:	ASL 2.0
 Group:		System Environment/Daemons
 URL:		http://trafficserver.apache.org/index.html
 
-Source0:	http://archive.apache.org/dist/%{name}/%{name}-%{version}.tar.bz2
-Source1:	http://archive.apache.org/dist/%{name}/%{name}-%{version}.tar.bz2.asc
-Source2:	trafficserver.keyring
+Source0:	https://mirrors.koehn.com/apache/%{name}/%{name}-%{version}.tar.bz2
+Source1:	https://downloads.apache.org/%{name}/%{name}-%{version}.tar.bz2.asc
+Source2:	https://downloads.apache.org/%{name}/KEYS
 Source3:	trafficserver.sysconf
 Source4:	trafficserver.service
-Source5:	trafficserver.tmpfilesd
-Patch1:		trafficserver-init_scripts.patch
-
-Patch101:	trafficserver-8.0.5-require-s-maxage.patch
-Patch102:	trafficserver-8.0.5.return_stale_cache_with_s_maxage.patch
 
 # BuildRoot is only needed for EPEL5:
 BuildRoot:	%(mktemp -ud %{_tmppath}/%{name}-%{version}-%{release}-XXXXXX)
 # fails on ARMv7 atm (needs investigation), s390 unsupported
 ExcludeArch:	%{arm} s390 s390x
 
-BuildRequires:	devtoolset-7
 BuildRequires:	boost-devel
 BuildRequires:	gcc-c++
 BuildRequires:	gnupg
@@ -38,18 +32,12 @@ BuildRequires:	zlib-devel
 BuildRequires:	xz-devel
 BuildRequires:	yaml-cpp-devel
 BuildRequires:	autoconf automake libtool
-
-Requires: initscripts
-%if %{?fedora}0 > 140 || %{?rhel}0 > 60
-# For systemd.macros
+BuildRequires:	ncurses-devel
+BuildRequires:	libcurl-devel
+BuildRequires:	libcap-devel
 BuildRequires: systemd
 Requires: systemd
 Requires(postun): systemd
-%else
-Requires(post): chkconfig
-Requires(preun): chkconfig initscripts
-Requires(postun): initscripts
-%endif
 
 %description
 Apache Traffic Server is a fast, scalable and extensible HTTP/1.1 compliant
@@ -73,19 +61,14 @@ Requires: trafficserver = %{version}-%{release}
 The trafficserver-perl package contains perl bindings.
 
 %prep
-#gpgv --homedir /tmp --keyring %{SOURCE2} --status-fd=1 %{SOURCE1} %{SOURCE0} | grep -q '^\[GNUPG:\] GOODSIG'
 
 %setup -q
 
-%patch1 -p1 -b .init
-%patch101 -p1
-%patch102 -p1
-
 %build
 NOCONFIGURE=1 autoreconf -vif
-scl enable devtoolset-7 "./configure \
+./configure \
   --enable-layout=opt \
-  --prefix=/opt/trafficserver \
+  --prefix=/usr \
   --includedir=%{_prefix}/include \
   --datarootdir=%{_prefix}/share \
   --datadir=%{_prefix}/share \
@@ -98,21 +81,23 @@ scl enable devtoolset-7 "./configure \
   --pdfdir=%{_prefix}/share/doc/trafficserver \
   --psdir=%{_prefix}/share/doc/trafficserver \
   --exec-prefix=%{_prefix} \
-  --sysconfdir=/opt/trafficserver/etc --libdir=%{_libdir} \
-  --localstatedir=/opt/trafficserver/var \
+  --sysconfdir=/etc/trafficserver \
+  --libdir=%{_libdir} \
+  --localstatedir=/var/trafficserver \
   --libexecdir=%{_prefix}/lib/trafficserver/modules \
-  --with-user=ats --with-group=ats --disable-silent-rules \
-  --enable-experimental-plugins --enable-32bit-build \
+  --with-user=ats \
+  --with-group=ats \
+  --disable-silent-rules \
+  --enable-experimental-plugins \
   --enable-mime-sanity-check \
   --with-yaml-cpp=%{_prefix} \
-  --enable-wccp \
-"
+  --enable-wccp
 
-scl enable devtoolset-7 "make %{?_smp_mflags} V=1"
+make %{?_smp_mflags} V=1
 
 %install
 rm -rf %{buildroot}
-scl enable devtoolset-7 "make DESTDIR=%{buildroot} install"
+make DESTDIR=%{buildroot} install
 
 # Remove duplicate man-pages:
 rm -rf %{buildroot}%{_docdir}/trafficserver
@@ -121,15 +106,8 @@ mkdir -p %{buildroot}%{_sysconfdir}/sysconfig
 install -m 644 -p %{SOURCE3} \
    %{buildroot}%{_sysconfdir}/sysconfig/trafficserver
 
-%if %{?fedora}0 > 140 || %{?rhel}0 > 60
 install -D -m 0644 -p %{SOURCE4} \
    %{buildroot}/lib/systemd/system/trafficserver.service
-install -D -m 0644 -p %{SOURCE5} \
-   %{buildroot}%{_sysconfdir}/tmpfiles.d/trafficserver.conf
-%else
-mkdir -p %{buildroot}/etc/init.d/
-mv %{buildroot}%{_prefix}/bin/trafficserver %{buildroot}/etc/init.d
-%endif
 
 # Remove libtool archives and static libs
 find %{buildroot} -type f -name "*.la" -delete
@@ -147,9 +125,7 @@ perl -pi -e 's/^CONFIG.*proxy.config.ssl.server.private_key.path.*$/CONFIG proxy
 	%{buildroot}/etc/trafficserver/records.config
 
 %check
-%ifnarch ppc64
-scl enable devtoolset-7 "make check %{?_smp_mflags} V=1"
-%endif
+make check %{?_smp_mflags} V=1
 
 # The clean section  is only needed for EPEL and Fedora < 13
 # http://fedoraproject.org/wiki/PackagingGuidelines#.25clean
@@ -159,44 +135,20 @@ rm -rf %{buildroot}
 
 %post
 /sbin/ldconfig
-%if %{?fedora}0 > 170 || %{?rhel}0 > 60
-  %systemd_post trafficserver.service
-%else
-  if [ $1 -eq 1 ] ; then
-  %if %{?fedora}0 > 140
-    /bin/systemctl daemon-reload >/dev/null 2>&1 || :
-  %else
-    /sbin/chkconfig --add %{name}
-  %endif
-  fi
-%endif
+%systemd_post trafficserver.service
+
 
 %pre
 getent group ats >/dev/null || groupadd -r ats -g 176 &>/dev/null
-getent passwd ats >/dev/null || \
-useradd -r -u 176 -g ats -d / -s /sbin/nologin \
-	-c "Apache Traffic Server" ats &>/dev/null
+getent passwd ats >/dev/null || useradd -r -u 176 -g ats -d / -s /sbin/nologin -c "Apache Traffic Server" ats &>/dev/null
 
 %preun
-%if %{?fedora}0 > 170 || %{?rhel}0 > 60
-  %systemd_preun trafficserver.service
-%else
-if [ $1 -eq 0 ] ; then
-  /sbin/service %{name} stop > /dev/null 2>&1
-  /sbin/chkconfig --del %{name}
-fi
-%endif
+%systemd_preun trafficserver.service
 
 %postun
 /sbin/ldconfig
 
-%if %{?fedora}0 > 170 || %{?rhel}0 > 60
-  %systemd_postun_with_restart trafficserver.service
-%else
-if [ $1 -eq 1 ] ; then
-  /sbin/service trafficserver condrestart &>/dev/null || :
-fi
-%endif
+%systemd_postun_with_restart trafficserver.service
 
 %files
 %defattr(-, ats, ats, -)
@@ -212,24 +164,19 @@ fi
 %{_libdir}/libts*.so
 %{_libdir}/libts*.so.8*
 %{_prefix}/lib/trafficserver/modules/*.so
-%if %{?fedora}0 > 140 || %{?rhel}0 > 60
 /lib/systemd/system/trafficserver.service
-%config(noreplace) %{_sysconfdir}/tmpfiles.d/trafficserver.conf
-%else
-/etc/init.d/trafficserver
-%endif
-%attr(0755, ats, ats) %dir /opt/trafficserver/var
-%attr(0755, ats, ats) %dir /opt/trafficserver/var/cache
-%attr(0755, ats, ats) %dir /opt/trafficserver/var/run
-%attr(0755, ats, ats) %dir /opt/trafficserver/var/logs
+%attr(0755, ats, ats) %dir /var/trafficserver
+%attr(0755, ats, ats) %dir /var/trafficserver/cache
+%attr(0755, ats, ats) %dir /var/trafficserver/run
+%attr(0755, ats, ats) %dir /var/trafficserver/logs
 
 %files perl
 %defattr(-,root,root,-)
 %{_prefix}/share/man/man3/*
-/opt/trafficserver/lib/perl5/Apache/TS.pm
-/opt/trafficserver/lib/perl5/Apache/TS/*
-/opt/trafficserver/lib/perl5/x86_64-linux-thread-multi/auto/Apache/TS/.packlist
-/opt/trafficserver/lib/perl5/x86_64-linux-thread-multi/perllocal.pod
+/usr/lib/trafficserver/perl5/Apache/TS.pm
+/usr/lib/trafficserver/perl5/Apache/TS/*
+/usr/lib/trafficserver/perl5/x86_64-linux-thread-multi/auto/Apache/TS/.packlist
+/usr/lib/trafficserver/perl5/x86_64-linux-thread-multi/perllocal.pod
 
 %files devel
 %defattr(-,root,root,-)
@@ -240,6 +187,10 @@ fi
 %{_libdir}/pkgconfig/trafficserver.pc
 
 %changelog
+* Thu Apr 23 2020 Joshua Gitlin <jgitlin@pinnacle21.com> 8.0.7
+- Update to Traffic Server 8.0.7
+- Update RPM for Amazon Linux 2
+
 * Fri Sep 13 2019 Hiroaki Nakamura <hnakamur@gmail.com> 8.0.5-1
 - Update to 8.0.5 LTS release
 
@@ -377,7 +328,7 @@ fi
 - Update to 4.1.2-rc0.
 
 * Mon Nov 11 2013 Jan-Frode Myklebust <janfrode@tanso.net> - 4.0.2-5
-- Buildrequire hwloc-devel, since it supposedly gives tremendous 
+- Buildrequire hwloc-devel, since it supposedly gives tremendous
   positive performance impact to use hwlock to optimize scaling and
   number of threads and alignment for actual hardware we're running on.
 
@@ -413,7 +364,7 @@ fi
     proxy.config.remap.use_remap_processor has been removed,
     use the proxy.config.remap.num_remap_threads instead.
 
-    Default proxy.config.cache.ram_cache.size has been increased by 
+    Default proxy.config.cache.ram_cache.size has been increased by
     a magnitude.
 
     Support for pre v3.2 port configuration directives has been removed.
@@ -462,7 +413,7 @@ fi
   [TS-1470] Fix cache sizes > 16TB (part 2 - Don't reset the cache after restart)
 
 * Mon Jun 3 2013 Jan-Frode Myklebust <janfrode@tanso.net> - 3.2.4-3
-- Harden build with PIE flags, ref bz#955127. 
+- Harden build with PIE flags, ref bz#955127.
 
 * Sat Jan 19 2013 Jan-Frode Myklebust <janfrode@tanso.net> - 3.2.4-1
 - Update to 3.2.4 release candiate

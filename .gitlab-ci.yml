@@ -1,0 +1,28 @@
+image: p21jgitlin/ats-builder:latest
+stages:
+  - build
+  - cleanup
+
+build RPMs:
+  stage: build
+  script:
+    - getent group ats >/dev/null || groupadd -r ats -g 176 &>/dev/null
+    - getent passwd ats >/dev/null || useradd -r -u 176 -g ats -d / -s /sbin/nologin -c "Apache Traffic Server" ats &>/dev/null
+    - mkdir -p BUILD RPMS SOURCES SPECS SRPMS
+    - cd SOURCES
+    - spectool -g ../SPECS/trafficserver.spec
+    - gpg --import KEYS
+    - gpg --verify trafficserver-*.tar.bz2.asc trafficserver-*.tar.bz2
+    - cd ../SPECS
+    - rpmbuild -bs trafficserver.spec
+    - rpmbuild -bb trafficserver.spec
+    - cd ../RPMS
+    - rpmlint trafficserver.spec
+  cache:
+    paths:
+      - SOURCES/*
+  artifacts:
+    expire_in: 6mo
+    paths:
+      - RPMS/*
+      - SRPMS/*
