@@ -6,18 +6,20 @@ stages:
 build RPMs:
   stage: build
   script:
+    - pwd
+    - mkdir -p {BUILD,BUILDROOT,RPMS,SOURCES,SPECS,SRPMS}
     - getent group ats >/dev/null || groupadd -r ats -g 176 &>/dev/null
     - getent passwd ats >/dev/null || useradd -r -u 176 -g ats -d / -s /sbin/nologin -c "Apache Traffic Server" ats &>/dev/null
-    - mkdir -p BUILD RPMS SOURCES SPECS SRPMS
+    - ls -lR
     - cd SOURCES
-    - spectool -g ../SPECS/trafficserver.spec
-    - gpg --import KEYS
-    - gpg --verify trafficserver-*.tar.bz2.asc trafficserver-*.tar.bz2
+    - sudo -u builder spectool -g ../SPECS/trafficserver.spec
+    - sudo -u builder gpg --import KEYS
+    - sudo -u builder gpg --verify trafficserver-*.tar.bz2.asc trafficserver-*.tar.bz2
     - cd ../SPECS
-    - rpmbuild -bs trafficserver.spec
-    - rpmbuild -bb trafficserver.spec
+    - sudo -u builder rpmbuild --define "_topdir `pwd`" trafficserver.spec
+    - sudo -u builder rpmbuild --define "_topdir `pwd`" trafficserver.spec
     - cd ../RPMS
-    - rpmlint trafficserver.spec
+    - sudo -u builder rpmlint --define "_topdir `pwd`" trafficserver.spec
   cache:
     paths:
       - SOURCES/*
